@@ -1,0 +1,20 @@
+[Unit]
+Description=pi-dash (tailnet host dashboard)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/opt/pi-dash
+Environment=PIDASH_PORT=8088
+# Leave PIDASH_BIND unset to bind to the tailscale0 address automatically.
+# Environment=PIDASH_BIND=0.0.0.0
+ExecStart=/opt/pi-dash/.venv/bin/python /opt/pi-dash/server.py
+Restart=on-failure
+RestartSec=5
+# Wait for tailscaled to hand out an address before binding.
+ExecStartPre=/bin/sh -c 'for i in $(seq 30); do tailscale ip -4 >/dev/null 2>&1 && exit 0; sleep 2; done; exit 0'
+
+[Install]
+WantedBy=multi-user.target
