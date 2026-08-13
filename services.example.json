@@ -1,0 +1,53 @@
+{
+  "_comment": [
+    "Widgets for the Directory tab. Copied to ~/.config/pidash/services.json by",
+    "the installer; edit it there and hit Refresh - no restart needed.",
+    "",
+    "type: minecraft  Java-edition Server List Ping. Needs host + port.",
+    "                 Shows MOTD, players online/max, version, server icon.",
+    "type: jellyfin   Reads /System/Info/Public, which needs no API key.",
+    "type: http       Any URL. 'expect' is a status code, or \"any\" when the",
+    "                 service answers but needs auth (a 401 still means it is up).",
+    "type: tcp        Plain connect check. The fallback for anything else.",
+    "",
+    "link: optional URL for the 'Open' button. Use a name your browser resolves,",
+    "      not 127.0.0.1 - the link opens on your machine, not the Pi."
+  ],
+  "services": [
+    {
+      "name": "Minecraft",
+      "type": "minecraft",
+      "host": "127.0.0.1",
+      "port": 25565,
+      "note": "Java edition"
+    },
+    {
+      "name": "Jellyfin",
+      "type": "jellyfin",
+      "url": "http://127.0.0.1:8096",
+      "link": "http://gus-pi:8096/",
+      "note": "Media library"
+    },
+    {
+      "name": "Pi-hole DNS",
+      "type": "tcp",
+      "host": "127.0.0.1",
+      "port": 53,
+      "note": "Resolver in Docker"
+    },
+    {
+      "name": "Nginx Proxy Manager",
+      "type": "http",
+      "url": "http://127.0.0.1:80/",
+      "expect": "any",
+      "link": "http://gus-pi/",
+      "note": "Reverse proxy"
+    },
+    {
+      "name": "SSH",
+      "type": "tcp",
+      "host": "127.0.0.1",
+      "port": 22
+    }
+  ]
+}

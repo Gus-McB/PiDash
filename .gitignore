@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Build artifact — regenerate from the tree, do not track
+pi-dash.tar.gz

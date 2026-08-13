@@ -1,0 +1,1544 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>pi-dash</title>
+<!-- Fonts and xterm are vendored into static/ so the page loads no third-party
+     script or stylesheet. The CSP in server.py refuses external origins outright. -->
+<link rel="stylesheet" href="/static/fonts.css">
+<style>
+:root{
+  --void:#0E1116;
+  --panel:#151A21;
+  --panel-2:#1B212A;
+  --rail:#232A34;
+  --hair:#2B3440;
+  --ink:#C6D0DC;
+  --ink-2:#8B98A8;
+  --dim:#66727F;
+  --raspberry:#E23A5E;
+  --raspberry-dim:#7A2137;
+  --sodium:#D9903A;
+  --legend:'Chakra Petch',ui-sans-serif,system-ui,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  --rail-w:74px;
+  --hdr-h:52px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--void);color:var(--ink);
+  font-family:var(--mono);font-size:13px;font-weight:400;
+  -webkit-font-smoothing:antialiased;overflow:hidden;
+}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+:focus-visible{outline:2px solid var(--raspberry);outline-offset:2px}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-track{background:var(--void)}
+::-webkit-scrollbar-thumb{background:var(--rail);border:2px solid var(--void);border-radius:6px}
+
+.legend{
+  font-family:var(--legend);font-weight:600;font-size:10px;
+  letter-spacing:.15em;text-transform:uppercase;color:var(--dim);
+}
+
+/* ---------------- shell ---------------- */
+#app{display:none;height:100%}
+#app.on{display:grid;grid-template-columns:var(--rail-w) 1fr;grid-template-rows:100%}
+
+/* ---------------- rack rail ---------------- */
+.rail{
+  position:relative;background:var(--panel);
+  border-right:1px solid var(--hair);
+  display:flex;flex-direction:column;align-items:center;
+  padding:10px 0;gap:2px;
+}
+.rail::before{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background-image:radial-gradient(circle at center,#090C10 0 3.2px,transparent 3.6px);
+  background-size:100% 21px;
+}
+.rail-mark{
+  position:relative;z-index:1;width:34px;height:34px;border-radius:4px;
+  background:var(--void);border:1px solid var(--hair);
+  display:grid;place-items:center;margin-bottom:12px;flex:none;
+}
+.rail-mark i{display:block;width:9px;height:9px;border-radius:50%;background:var(--raspberry)}
+.slot{
+  position:relative;z-index:1;width:56px;padding:9px 0 7px;border-radius:5px;
+  display:flex;flex-direction:column;align-items:center;gap:5px;
+  background:var(--panel);color:var(--dim);
+  border:1px solid transparent;transition:color .12s,background .12s;
+}
+.slot:hover{color:var(--ink-2);background:var(--panel-2)}
+.slot[aria-selected="true"]{color:var(--ink);background:var(--panel-2);border-color:var(--hair)}
+.slot[aria-selected="true"]::after{
+  content:"";position:absolute;left:-1px;top:8px;bottom:8px;width:2px;background:var(--raspberry);
+}
+.slot svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.5;
+  stroke-linecap:round;stroke-linejoin:round}
+.slot span{font-family:var(--legend);font-weight:600;font-size:8.5px;letter-spacing:.1em;text-transform:uppercase}
+.slot .fault{
+  position:absolute;top:5px;right:7px;width:5px;height:5px;border-radius:50%;
+  background:var(--raspberry);display:none;
+}
+.slot.has-fault .fault{display:block}
+.rail-foot{margin-top:auto;position:relative;z-index:1;display:flex;flex-direction:column;
+  align-items:center;gap:8px}
+
+/* ---------------- header ---------------- */
+main{display:grid;grid-template-rows:var(--hdr-h) 1fr;min-width:0;min-height:0}
+header{
+  display:flex;align-items:center;gap:18px;padding:0 18px;
+  border-bottom:1px solid var(--hair);background:var(--panel);min-width:0;
+}
+.host{font-weight:700;font-size:14px;letter-spacing:-.01em;white-space:nowrap}
+.host em{font-style:normal;color:var(--dim);font-weight:300}
+.hdr-facts{display:flex;gap:16px;overflow:hidden;flex:1;min-width:0}
+.fact{display:flex;flex-direction:column;gap:1px;white-space:nowrap}
+.fact b{font-weight:500;font-size:12px;color:var(--ink-2)}
+.link-state{display:flex;align-items:center;gap:7px;flex:none}
+.link-state i{width:7px;height:7px;border-radius:50%;background:var(--dim)}
+.link-state.live i{background:var(--ink);box-shadow:0 0 0 3px rgba(198,208,220,.1)}
+.link-state.down i{background:var(--raspberry);box-shadow:0 0 0 3px rgba(226,58,94,.15)}
+
+/* ---------------- panels ---------------- */
+.stage{overflow:auto;min-height:0;padding:18px}
+.view{display:none}
+.view.on{display:block}
+/* Directory keeps its toolbar pinned and scrolls the content beneath it. */
+.stage:has(#view-dir.on),.stage:has(#view-hist.on){overflow:hidden}
+#view-dir.on{display:flex;flex-direction:column;height:100%;min-height:0}
+
+/* ---------------- signature: throttle strip ---------------- */
+.throttle{
+  border:1px solid var(--hair);background:var(--panel);border-radius:6px;
+  padding:13px 15px 15px;margin-bottom:14px;
+}
+.throttle-top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:12px}
+.throttle-top .raw{font-size:11px;color:var(--dim)}
+.lamps{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}
+.lamp{
+  border:1px solid var(--hair);border-radius:4px;background:#0B0E13;
+  padding:9px 10px;display:flex;flex-direction:column;gap:7px;min-width:0;
+}
+.lamp .bulb{
+  width:100%;height:3px;border-radius:2px;background:var(--rail);
+  transition:background .25s,box-shadow .25s;
+}
+.lamp .name{font-family:var(--legend);font-weight:600;font-size:9.5px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lamp .scope{font-size:9px;color:#4A545F;letter-spacing:.04em}
+.lamp.hot .bulb{background:var(--raspberry);box-shadow:0 0 10px rgba(226,58,94,.55)}
+.lamp.hot .name{color:var(--raspberry)}
+.lamp.past .bulb{background:var(--sodium);opacity:.75}
+.lamp.past .name{color:var(--sodium)}
+@media(prefers-reduced-motion:no-preference){
+  .lamp.hot .bulb{animation:trip 1.6s ease-in-out infinite}
+}
+@keyframes trip{0%,100%{opacity:1}50%{opacity:.55}}
+
+/* ---------------- readouts ---------------- */
+.grid{display:grid;gap:14px}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.card{border:1px solid var(--hair);background:var(--panel);border-radius:6px;padding:13px 15px 12px}
+.card h3{margin:0 0 11px;font-family:var(--legend);font-weight:600;font-size:10px;
+  letter-spacing:.15em;text-transform:uppercase;color:var(--dim)}
+.readout{display:flex;align-items:flex-end;gap:6px;margin-bottom:9px}
+.readout .val{font-size:31px;font-weight:300;line-height:.92;letter-spacing:-.03em;
+  font-variant-numeric:tabular-nums}
+.readout .unit{font-size:12px;color:var(--dim);padding-bottom:3px}
+.readout.warn .val{color:var(--sodium)}
+.readout.bad .val{color:var(--raspberry)}
+.sub{font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+canvas.spark{display:block;width:100%;height:34px;margin:2px 0 8px}
+
+.bar{height:3px;background:var(--rail);border-radius:2px;overflow:hidden;margin:7px 0}
+.bar i{display:block;height:100%;background:var(--ink-2);transition:width .5s ease}
+.bar.warn i{background:var(--sodium)}
+.bar.bad i{background:var(--raspberry)}
+
+.cores{display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:8px}
+.core{display:flex;flex-direction:column;gap:5px}
+.core .n{font-size:9.5px;color:var(--dim);display:flex;justify-content:space-between}
+.rows{display:flex;flex-direction:column;gap:11px}
+.row-line{display:flex;justify-content:space-between;font-size:11.5px;gap:10px}
+.row-line b{font-weight:500;color:var(--ink-2);font-variant-numeric:tabular-nums}
+
+/* ---------------- tables / toolbar ---------------- */
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:13px}
+input[type=text],select{
+  font:inherit;font-size:12px;background:var(--panel);color:var(--ink);
+  border:1px solid var(--hair);border-radius:4px;padding:6px 9px;min-width:0;
+}
+input[type=text]::placeholder{color:#4E5866}
+input[type=text]:focus,select:focus{border-color:var(--rail);outline:none;
+  box-shadow:0 0 0 2px rgba(226,58,94,.18)}
+.grow{flex:1;min-width:150px}
+.btn{border:1px solid var(--hair);border-radius:4px;padding:6px 11px;font-size:11px;
+  color:var(--ink-2);background:var(--panel)}
+.btn:hover{color:var(--ink);border-color:var(--rail);background:var(--panel-2)}
+.btn.on{color:var(--ink);border-color:var(--raspberry-dim);background:var(--panel-2)}
+.count{font-size:11px;color:var(--dim);margin-left:auto;white-space:nowrap}
+
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead th{
+  position:sticky;top:0;background:var(--void);text-align:left;padding:7px 10px;
+  font-family:var(--legend);font-weight:600;font-size:9.5px;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--dim);border-bottom:1px solid var(--hair);z-index:2;
+}
+tbody td{padding:8px 10px;border-bottom:1px solid #1C232C;vertical-align:top}
+tbody tr:hover{background:var(--panel)}
+.state{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.state i{width:6px;height:6px;border-radius:50%;background:var(--rail);flex:none}
+.state.run i{background:var(--ink-2)}
+.state.fail i{background:var(--raspberry);box-shadow:0 0 7px rgba(226,58,94,.6)}
+.state.fail{color:var(--raspberry)}
+.unit-name{color:var(--ink);word-break:break-all}
+.desc{color:var(--dim);word-break:break-word}
+.acts{display:flex;gap:5px;justify-content:flex-end}
+.acts .btn{padding:3px 8px;font-size:10px}
+
+/* ---------------- logs ---------------- */
+.log-list{display:flex;flex-direction:column;gap:1px}
+.log{
+  display:grid;grid-template-columns:74px 20px minmax(120px,190px) 1fr;gap:11px;
+  padding:7px 10px;font-size:12px;border-left:2px solid transparent;background:var(--panel);
+}
+.log:hover{background:var(--panel-2)}
+.log time{color:var(--dim);font-size:11px;font-variant-numeric:tabular-nums}
+.log .p{font-family:var(--legend);font-size:9px;font-weight:700;letter-spacing:.06em;
+  padding-top:1px;color:var(--dim)}
+.log .u{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.log .m{white-space:pre-wrap;word-break:break-word;color:var(--ink)}
+.log.p-err{border-left-color:var(--raspberry)}
+.log.p-err .p{color:var(--raspberry)}
+.log.p-crit{border-left-color:var(--raspberry);background:#1A1216}
+.log.p-crit .p{color:var(--raspberry)}
+.log.p-warn{border-left-color:var(--sodium)}
+.log.p-warn .p{color:var(--sodium)}
+
+/* ---------------- directory ---------------- */
+.dir-scroll{overflow:auto;min-height:0;flex:1;margin:0 -2px;padding:0 2px}
+h3.sect{margin:2px 0 11px;font-family:var(--legend);font-weight:600;font-size:10px;
+  letter-spacing:.15em;text-transform:uppercase;color:var(--dim);
+  display:flex;align-items:baseline;gap:10px}
+h3.sect:not(:first-child){margin-top:26px}
+.sect-note{font-family:var(--mono);font-size:10.5px;letter-spacing:0;
+  text-transform:none;color:var(--sodium);font-weight:400}
+
+.widgets{display:grid;gap:11px;grid-template-columns:repeat(auto-fill,minmax(268px,1fr))}
+.w{border:1px solid var(--hair);background:var(--panel);border-radius:6px;
+  padding:12px 14px;display:flex;flex-direction:column;gap:9px;min-width:0}
+.w.down{border-color:var(--raspberry-dim)}
+.w-top{display:flex;align-items:center;gap:9px;min-width:0}
+.w-name{font-size:13px;color:var(--ink);font-weight:500;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.w-icon{width:26px;height:26px;border-radius:5px;flex:none;object-fit:cover;
+  background:var(--panel-2);image-rendering:pixelated}
+.w-lat{margin-left:auto;font-size:10.5px;color:var(--dim);font-variant-numeric:tabular-nums;
+  flex:none}
+.w-target{font-size:10.5px;color:var(--dim);word-break:break-all}
+.w-motd{font-size:11.5px;color:var(--ink-2);white-space:pre-wrap;word-break:break-word;
+  line-height:1.45;max-height:44px;overflow:hidden}
+.w-err{font-size:11px;color:var(--raspberry);word-break:break-word}
+.w-facts{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:11px}
+.w-fact{display:flex;gap:6px}
+.w-fact span{color:var(--dim)}
+.w-fact b{font-weight:500;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.w-players{display:flex;flex-wrap:wrap;gap:4px;margin-top:1px}
+.w-players b{font-size:10px;font-weight:400;color:var(--ink-2);background:var(--panel-2);
+  border:1px solid var(--hair);border-radius:3px;padding:1px 6px}
+.w a.w-link{font-size:10.5px;color:var(--ink-2);text-decoration:none;
+  border-bottom:1px dotted var(--rail);align-self:flex-start}
+.w a.w-link:hover{color:var(--ink);border-bottom-color:var(--ink-2)}
+
+/* Exposure is the reason this table exists: reachable-on-the-LAN is the one
+   that wants your attention, so it is the only badge that takes a colour. */
+.scope{display:inline-flex;align-items:center;gap:6px;font-size:10px;
+  font-family:var(--legend);font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--dim);white-space:nowrap}
+.scope i{width:6px;height:6px;border-radius:50%;background:var(--rail);flex:none}
+.scope.lan{color:var(--sodium)}
+.scope.lan i{background:var(--sodium);box-shadow:0 0 7px rgba(217,144,58,.55)}
+.scope.tailnet i,.scope.local i{background:var(--ink-2)}
+.port-n{color:var(--ink);font-variant-numeric:tabular-nums}
+.port-p{color:var(--dim);font-size:10.5px;margin-left:5px}
+.pids{color:var(--dim);font-size:11px;font-variant-numeric:tabular-nums}
+td .plink{color:var(--ink-2);text-decoration:none;border-bottom:1px dotted var(--rail)}
+td .plink:hover{color:var(--ink)}
+
+/* ---------------- history ---------------- */
+/* Same deal as the directory: the range buttons stay put, the charts scroll. */
+#view-hist.on{display:flex;flex-direction:column;height:100%;min-height:0}
+.hist-scroll{overflow:auto;min-height:0;flex:1;display:flex;flex-direction:column;gap:12px;
+  margin:0 -2px;padding:0 2px 2px}
+.chart{border:1px solid var(--hair);background:var(--panel);border-radius:6px;
+  padding:12px 14px 9px;flex:none}
+.chart-head{display:flex;align-items:baseline;gap:12px;margin-bottom:7px;min-width:0}
+.chart-head h3{margin:0;font-family:var(--legend);font-weight:600;font-size:10px;
+  letter-spacing:.15em;text-transform:uppercase;color:var(--dim);white-space:nowrap}
+.chart-note{font-size:10px;color:#4A545F;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chart-now{margin-left:auto;font-size:12.5px;color:var(--ink);font-variant-numeric:tabular-nums;
+  white-space:nowrap;flex:none}
+.chart-now.warn{color:var(--sodium)}
+.chart-now.bad{color:var(--raspberry)}
+canvas.plot{display:block;width:100%;height:104px;touch-action:pan-y}
+.chart.tall canvas.plot{height:124px}
+
+/* One tooltip for the whole stack: hovering any chart reads every metric at
+   that instant, which is the question you actually came here to answer. */
+.hist-tip{
+  position:fixed;z-index:40;pointer-events:none;display:none;
+  background:#0B0E13;border:1px solid var(--hair);border-radius:5px;
+  padding:9px 11px;min-width:186px;box-shadow:0 10px 28px rgba(0,0,0,.55);
+}
+.hist-tip .when{font-size:10.5px;color:var(--ink-2);margin-bottom:7px;
+  padding-bottom:6px;border-bottom:1px solid #1C232C;font-variant-numeric:tabular-nums}
+.hist-tip .r{display:flex;justify-content:space-between;gap:16px;font-size:11px;line-height:1.75}
+.hist-tip .r span{color:var(--dim)}
+.hist-tip .r b{font-weight:500;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.hist-tip .thr{margin-top:6px;padding-top:6px;border-top:1px solid #1C232C;
+  font-size:10px;color:var(--raspberry);font-family:var(--legend);font-weight:600;
+  letter-spacing:.09em;text-transform:uppercase}
+
+/* ---------------- processes ---------------- */
+.cpu-cell{display:flex;align-items:center;gap:9px}
+.cpu-num{min-width:42px;text-align:right;color:var(--ink);font-variant-numeric:tabular-nums}
+.cpu-num.warn{color:var(--sodium)}
+.cpu-num.bad{color:var(--raspberry)}
+.minibar{flex:1;min-width:26px;max-width:64px;height:3px;background:var(--rail);
+  border-radius:2px;overflow:hidden}
+.minibar i{display:block;height:100%;background:var(--ink-2)}
+.minibar i.warn{background:var(--sodium)}
+.minibar i.bad{background:var(--raspberry)}
+.proc-name{color:var(--ink)}
+.proc-cmd{color:var(--dim);font-size:10.5px;margin-top:3px;line-height:1.45;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  word-break:break-all}
+.proc-kern{color:#4A545F}
+.num{font-variant-numeric:tabular-nums;color:var(--ink-2)}
+
+/* ---------------- empty / gate ---------------- */
+.empty{padding:44px 20px;text-align:center;color:var(--dim);font-size:12.5px;line-height:1.7}
+.empty strong{display:block;color:var(--ink-2);font-size:13px;margin-bottom:6px;font-weight:500}
+
+#gate{position:fixed;inset:0;display:grid;place-items:center;background:var(--void);padding:22px;z-index:50}
+.gate-box{width:100%;max-width:360px}
+.gate-box h1{font-family:var(--legend);font-size:15px;font-weight:700;letter-spacing:.2em;
+  text-transform:uppercase;margin:0 0 4px}
+.gate-box p{color:var(--dim);font-size:12px;line-height:1.65;margin:0 0 18px}
+.gate-box code{color:var(--ink-2);font-size:11.5px}
+.gate-box input{width:100%;margin-bottom:9px;padding:9px 11px}
+.gate-box .btn{width:100%;padding:9px;color:var(--ink);border-color:var(--raspberry-dim)}
+#gate-err{color:var(--raspberry);font-size:11.5px;min-height:17px;margin-top:9px}
+
+@media (max-width:820px){
+  #app.on{grid-template-columns:1fr;grid-template-rows:1fr auto}
+  .rail{flex-direction:row;justify-content:space-around;order:2;padding:6px 4px;
+    border-right:none;border-top:1px solid var(--hair);
+    padding-bottom:calc(6px + env(safe-area-inset-bottom))}
+  .rail::before{background-size:19px 100%}
+  .rail-mark,.rail-foot{display:none}
+  /* Six slots do not fit at a fixed 56px on a phone. */
+  .slot{width:auto;flex:1;min-width:0;padding:8px 2px 6px}
+  .slot span{font-size:8px;letter-spacing:.04em}
+  main{order:1;min-height:0}
+  .g4,.g2{grid-template-columns:1fr}
+  .lamps{grid-template-columns:repeat(2,1fr)}
+  .hdr-facts .fact:nth-child(n+3){display:none}
+  .log{grid-template-columns:1fr;gap:3px}
+  .stage{padding:12px}
+}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="gate-box">
+    <h1>pi-dash</h1>
+    <p>Paste the access token. It's printed when the service starts, and stored at
+       <code>~/.config/pidash/token</code> on the Pi.</p>
+    <input type="password" id="gate-token" placeholder="access token" autocomplete="off" spellcheck="false">
+    <button class="btn" id="gate-go">Unlock</button>
+    <div id="gate-err"></div>
+  </div>
+</div>
+
+<div id="app">
+  <nav class="rail" role="tablist" aria-label="Sections">
+    <div class="rail-mark" title="pi-dash"><i></i></div>
+    <button class="slot" role="tab" data-view="over" aria-selected="true">
+      <span class="fault"></span>
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h4M7 13h10M7 17h6"/></svg>
+      <span>Panel</span>
+    </button>
+    <button class="slot" role="tab" data-view="hist" aria-selected="false">
+      <span class="fault"></span>
+      <svg viewBox="0 0 24 24"><path d="M3 4v16h18"/><path d="M6.5 15l4-5 3.5 2.5 4.5-6.5"/></svg>
+      <span>History</span>
+    </button>
+    <button class="slot" role="tab" data-view="proc" aria-selected="false">
+      <span class="fault"></span>
+      <svg viewBox="0 0 24 24"><rect x="7.5" y="7.5" width="9" height="9" rx="1.5"/><path d="M10 3.5v4M14 3.5v4M10 16.5v4M14 16.5v4M3.5 10h4M3.5 14h4M16.5 10h4M16.5 14h4"/></svg>
+      <span>Processes</span>
+    </button>
+    <button class="slot" role="tab" data-view="svc" aria-selected="false">
+      <span class="fault"></span>
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/></svg>
+      <span>Units</span>
+    </button>
+    <button class="slot" role="tab" data-view="logs" aria-selected="false">
+      <span class="fault"></span>
+      <svg viewBox="0 0 24 24"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg>
+      <span>Faults</span>
+    </button>
+    <button class="slot" role="tab" data-view="dir" aria-selected="false">
+      <span class="fault"></span>
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+      <span>Directory</span>
+    </button>
+    <div class="rail-foot">
+      <button class="btn" id="sign-out" style="padding:5px 8px;font-size:9px" title="Forget token">LOCK</button>
+    </div>
+  </nav>
+
+  <main>
+    <header>
+      <div class="host" id="h-host">—<em id="h-model"></em></div>
+      <div class="hdr-facts">
+        <div class="fact"><span class="legend">Uptime</span><b id="h-up">—</b></div>
+        <div class="fact"><span class="legend">Tailnet</span><b id="h-ip">—</b></div>
+        <div class="fact"><span class="legend">Load</span><b id="h-load">—</b></div>
+        <div class="fact"><span class="legend">Kernel</span><b id="h-kernel">—</b></div>
+      </div>
+      <div class="link-state" id="h-link"><i></i><span class="legend" id="h-link-t">Connecting</span></div>
+    </header>
+
+    <div class="stage">
+
+      <!-- ============ PANEL ============ -->
+      <section class="view on" id="view-over">
+        <div class="throttle">
+          <div class="throttle-top">
+            <span class="legend">Power &amp; thermal flags</span>
+            <span class="raw" id="thr-raw">reading…</span>
+          </div>
+          <div class="lamps" id="lamps"></div>
+        </div>
+
+        <div class="grid g4" style="margin-bottom:14px">
+          <div class="card">
+            <h3>CPU</h3>
+            <div class="readout" id="r-cpu"><span class="val">—</span><span class="unit">%</span></div>
+            <canvas class="spark" id="sp-cpu"></canvas>
+            <div class="sub" id="s-cpu">—</div>
+          </div>
+          <div class="card">
+            <h3>Core temp</h3>
+            <div class="readout" id="r-temp"><span class="val">—</span><span class="unit">°C</span></div>
+            <canvas class="spark" id="sp-temp"></canvas>
+            <div class="sub" id="s-temp">—</div>
+          </div>
+          <div class="card">
+            <h3>Memory</h3>
+            <div class="readout" id="r-mem"><span class="val">—</span><span class="unit">%</span></div>
+            <canvas class="spark" id="sp-mem"></canvas>
+            <div class="sub" id="s-mem">—</div>
+          </div>
+          <div class="card">
+            <h3>Units</h3>
+            <div class="readout" id="r-svc"><span class="val">—</span><span class="unit">running</span></div>
+            <div class="rows" id="svc-mini" style="margin:6px 0 8px;gap:6px"></div>
+            <div class="sub" id="s-svc">—</div>
+          </div>
+        </div>
+
+        <div class="grid g2">
+          <div class="card">
+            <h3>Per-core load</h3>
+            <div class="cores" id="cores"></div>
+          </div>
+          <div class="card">
+            <h3>Storage &amp; network</h3>
+            <div class="rows" id="storage"></div>
+            <canvas class="spark" id="sp-net" style="margin-top:10px"></canvas>
+            <div class="sub">Combined throughput, KB/s</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ HISTORY ============ -->
+      <section class="view" id="view-hist">
+        <div class="toolbar">
+          <button class="btn" data-span="3600">1h</button>
+          <button class="btn" data-span="21600">6h</button>
+          <button class="btn on" data-span="86400">24h</button>
+          <button class="btn" data-span="259200">3d</button>
+          <button class="btn" data-span="604800">7d</button>
+          <button class="btn" id="hist-refresh">Refresh</button>
+          <span class="count" id="hist-count"></span>
+        </div>
+        <div class="hist-scroll" id="hist-scroll">
+          <div class="empty" id="hist-empty" style="display:none"></div>
+        </div>
+        <div class="hist-tip" id="hist-tip"></div>
+      </section>
+
+      <!-- ============ PROCESSES ============ -->
+      <section class="view" id="view-proc">
+        <div class="toolbar">
+          <input type="text" id="proc-q" class="grow" placeholder="filter by name, command, user or pid" spellcheck="false">
+          <button class="btn on" data-procsort="cpu">By CPU</button>
+          <button class="btn" data-procsort="mem">By memory</button>
+          <select id="proc-limit">
+            <option value="15">Top 15</option>
+            <option value="30" selected>Top 30</option>
+            <option value="60">Top 60</option>
+            <option value="150">Top 150</option>
+          </select>
+          <span class="count" id="proc-count"></span>
+        </div>
+        <table>
+          <thead><tr>
+            <th style="width:132px">CPU</th>
+            <th style="width:132px">Memory</th>
+            <th style="width:74px">PID</th>
+            <th style="width:104px">User</th>
+            <th>Process</th>
+            <th style="width:86px">Age</th>
+          </tr></thead>
+          <tbody id="proc-body"></tbody>
+        </table>
+        <div class="empty" id="proc-empty" style="display:none"><strong>Nothing matches</strong>Clear the filter to see the busiest processes.</div>
+      </section>
+
+      <!-- ============ UNITS ============ -->
+      <section class="view" id="view-svc">
+        <div class="toolbar">
+          <input type="text" id="svc-q" class="grow" placeholder="filter units" spellcheck="false">
+          <button class="btn on" data-svcf="all">All</button>
+          <button class="btn" data-svcf="running">Running</button>
+          <button class="btn" data-svcf="failed">Failed</button>
+          <span class="count" id="svc-count"></span>
+        </div>
+        <table>
+          <thead><tr><th style="width:150px">State</th><th>Unit</th><th>Description</th><th style="width:170px"></th></tr></thead>
+          <tbody id="svc-body"></tbody>
+        </table>
+        <div class="empty" id="svc-empty" style="display:none"><strong>No units match</strong>Clear the filter to see everything systemd knows about.</div>
+      </section>
+
+      <!-- ============ FAULTS ============ -->
+      <section class="view" id="view-logs">
+        <div class="toolbar">
+          <input type="text" id="log-q" class="grow" placeholder="search text" spellcheck="false">
+          <select id="log-prio">
+            <option value="2">Critical and worse</option>
+            <option value="3" selected>Errors and worse</option>
+            <option value="4">Warnings and worse</option>
+            <option value="6">Everything</option>
+          </select>
+          <select id="log-unit"><option value="">All units</option></select>
+          <select id="log-since">
+            <option value="-1h">Last hour</option>
+            <option value="today" selected>Today</option>
+            <option value="-7d">Last 7 days</option>
+            <option value="">Since boot log start</option>
+          </select>
+          <button class="btn" id="log-refresh">Refresh</button>
+          <span class="count" id="log-count"></span>
+        </div>
+        <div class="log-list" id="log-list"></div>
+        <div class="empty" id="log-empty" style="display:none"><strong>Nothing logged at this level</strong>Widen the window or drop to warnings to see more.</div>
+      </section>
+
+      <!-- ============ DIRECTORY ============ -->
+      <section class="view" id="view-dir">
+        <div class="toolbar">
+          <input type="text" id="dir-q" class="grow" placeholder="filter by name, port or process" spellcheck="false">
+          <select id="dir-scope">
+            <option value="">All exposure</option>
+            <option value="lan">Reachable on the LAN</option>
+            <option value="tailnet">Tailnet only</option>
+            <option value="local">Loopback only</option>
+          </select>
+          <button class="btn" id="dir-refresh">Refresh</button>
+          <span class="count" id="dir-count"></span>
+        </div>
+
+        <div class="dir-scroll">
+          <h3 class="sect">Watched services</h3>
+          <div class="widgets" id="widgets"></div>
+          <div class="empty" id="widget-empty" style="display:none"></div>
+
+          <h3 class="sect">Listening ports<span class="sect-note" id="dir-named"></span></h3>
+          <table class="tbl" id="ports">
+            <thead><tr>
+              <th style="width:92px">Port</th>
+              <th style="width:112px">Exposure</th>
+              <th>Process</th>
+              <th style="width:150px">Bind</th>
+              <th style="width:96px">PIDs</th>
+            </tr></thead>
+            <tbody id="ports-body"></tbody>
+          </table>
+          <div class="empty" id="ports-empty" style="display:none"><strong>No sockets matched</strong>Clear the filter to see everything listening.</div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------ token + fetch */
+const store = {
+  get(){ try { return localStorage.getItem("pidash-token") || ""; } catch { return ""; } },
+  set(v){ try { localStorage.setItem("pidash-token", v); } catch {} },
+  clear(){ try { localStorage.removeItem("pidash-token"); } catch {} }
+};
+let TOKEN = store.get();
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: { ...(opts.headers || {}), Authorization: "Bearer " + TOKEN }
+  });
+  if (res.status === 401) { lock("Token rejected."); throw new Error("unauthorised"); }
+  if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
+  return res.json();
+}
+
+function lock(msg) {
+  store.clear(); TOKEN = "";
+  $("#app").classList.remove("on");
+  $("#gate").style.display = "grid";
+  $("#gate-err").textContent = msg || "";
+  stopPolling();
+}
+
+$("#gate-go").onclick = async () => {
+  const v = $("#gate-token").value.trim();
+  if (!v) { $("#gate-err").textContent = "Enter the token first."; return; }
+  TOKEN = v;
+  $("#gate-err").textContent = "Checking…";
+  try {
+    await api("/api/metrics");
+    store.set(v); start();
+  } catch (e) {
+    TOKEN = "";
+    $("#gate-err").textContent = /unauthorised/.test(e.message)
+      ? "Token rejected."
+      : "Can't reach the Pi. Check the service is running and you're on the tailnet.";
+  }
+};
+$("#gate-token").addEventListener("keydown", e => { if (e.key === "Enter") $("#gate-go").click(); });
+$("#sign-out").onclick = () => lock("");
+
+function start() {
+  $("#gate").style.display = "none";
+  $("#app").classList.add("on");
+  startPolling();
+  loadLogs();
+}
+
+/* ------------------------------------------------ formatting */
+const bytes = n => {
+  if (n == null) return "—";
+  const u = ["B","KB","MB","GB","TB"]; let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i === 0 ? n : n.toFixed(n < 10 ? 1 : 0)) + " " + u[i];
+};
+const rate = n => bytes(n) + "/s";
+const dur = s => {
+  if (s == null) return "—";
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+};
+const clock = ts => new Date(ts * 1000).toLocaleTimeString("en-AU", { hour12: false });
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+
+/* ------------------------------------------------ sparklines */
+function Spark(canvas, opts = {}) {
+  const max = opts.max, keep = 100, data = [];
+  const draw = () => {
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    if (!w || !h) return;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    const c = canvas.getContext("2d");
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, w, h);
+    if (data.length < 2) return;
+    const hi = max || Math.max(...data, 1);
+    const x = i => (i / (keep - 1)) * w;
+    const y = v => h - 2 - (Math.min(v, hi) / hi) * (h - 4);
+    const off = keep - data.length;
+
+    c.strokeStyle = "#232A34"; c.lineWidth = 1;
+    c.beginPath(); c.moveTo(0, h - 0.5); c.lineTo(w, h - 0.5); c.stroke();
+
+    c.beginPath(); c.moveTo(x(off), y(data[0]));
+    data.forEach((v, i) => c.lineTo(x(off + i), y(v)));
+    const last = data[data.length - 1];
+    const hot = max && last / max > 0.85;
+    c.strokeStyle = hot ? "#E23A5E" : "#8B98A8";
+    c.lineWidth = 1.25; c.lineJoin = "round"; c.stroke();
+
+    c.lineTo(x(keep - 1), h); c.lineTo(x(off), h); c.closePath();
+    const g = c.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, hot ? "rgba(226,58,94,.20)" : "rgba(139,152,168,.16)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    c.fillStyle = g; c.fill();
+  };
+  return {
+    push(v) { if (v == null) return; data.push(v); if (data.length > keep) data.shift(); draw(); },
+    redraw: draw
+  };
+}
+const sparks = {
+  cpu:  Spark($("#sp-cpu"),  { max: 100 }),
+  temp: Spark($("#sp-temp"), { max: 90 }),
+  mem:  Spark($("#sp-mem"),  { max: 100 }),
+  net:  Spark($("#sp-net"))
+};
+addEventListener("resize", () => Object.values(sparks).forEach(s => s.redraw()));
+
+/* ------------------------------------------------ metrics render */
+function setReadout(el, value, level) {
+  el.querySelector(".val").textContent = value;
+  el.classList.remove("warn", "bad");
+  if (level) el.classList.add(level);
+}
+const band = (v, warn, bad) => v == null ? null : v >= bad ? "bad" : v >= warn ? "warn" : null;
+
+function renderLamps(thr) {
+  const host = $("#lamps");
+  $("#thr-raw").textContent = thr.available
+    ? "vcgencmd get_throttled → " + thr.raw
+    : "vcgencmd unavailable. Add the service user to the video group.";
+  if (host.childElementCount !== thr.flags.length) {
+    host.innerHTML = thr.flags.map(f =>
+      `<div class="lamp" data-k="${f.key}">
+         <div class="bulb"></div>
+         <div class="name">${esc(f.label)}</div>
+         <div class="scope">${f.scope === "now" ? "current" : "since boot"}</div>
+       </div>`).join("");
+  }
+  thr.flags.forEach(f => {
+    const el = host.querySelector(`[data-k="${f.key}"]`);
+    el.classList.toggle("hot", f.set && f.scope === "now");
+    el.classList.toggle("past", f.set && f.scope === "boot");
+  });
+}
+
+function renderMetrics(m) {
+  $("#h-host").firstChild.textContent = m.host.hostname + " ";
+  $("#h-model").textContent = m.host.model;
+  $("#h-up").textContent = dur(m.host.uptime_s);
+  $("#h-ip").textContent = m.host.tailscale_ip || "not on tailnet";
+  $("#h-load").textContent = m.host.load.join("  ");
+  $("#h-kernel").textContent = m.host.kernel;
+
+  renderLamps(m.throttle);
+
+  const cpu = m.cpu.percent;
+  setReadout($("#r-cpu"), cpu.toFixed(0), band(cpu, 75, 92));
+  sparks.cpu.push(cpu);
+  $("#s-cpu").textContent = `${m.cpu.count} cores · ${m.cpu.freq_mhz ?? "—"} MHz`
+    + (m.cpu.freq_max_mhz ? ` of ${m.cpu.freq_max_mhz}` : "");
+
+  const t = m.thermal.cpu_c;
+  setReadout($("#r-temp"), t == null ? "—" : t.toFixed(1), band(t, 70, 80));
+  sparks.temp.push(t);
+  $("#s-temp").textContent = [
+    m.thermal.fan_rpm != null ? `fan ${m.thermal.fan_rpm} rpm` : null,
+    m.thermal.core_volts != null ? `${m.thermal.core_volts.toFixed(3)} V core` : null
+  ].filter(Boolean).join(" · ") || "no fan or voltage sensor";
+
+  setReadout($("#r-mem"), m.mem.percent.toFixed(0), band(m.mem.percent, 80, 92));
+  sparks.mem.push(m.mem.percent);
+  $("#s-mem").textContent = `${bytes(m.mem.used)} of ${bytes(m.mem.total)}`
+    + (m.mem.swap_total ? ` · swap ${bytes(m.mem.swap_used)}` : " · no swap");
+
+  const failed = m.services.failed;
+  setReadout($("#r-svc"), m.services.running, failed ? "bad" : null);
+  sparks.net.push((m.net.rx_bps + m.net.tx_bps) / 1024);
+  $("#svc-mini").innerHTML =
+    `<div class="row-line"><span>Failed</span>
+       <b style="${failed ? "color:var(--raspberry)" : ""}">${failed}</b></div>
+     <div class="row-line"><span>Inactive or exited</span>
+       <b>${Math.max(0, m.services.total - m.services.running - failed)}</b></div>
+     <div class="row-line"><span>Known to systemd</span><b>${m.services.total}</b></div>`;
+  $("#s-svc").textContent = failed
+    ? `${failed} need attention`
+    : m.services.total ? "All units healthy" : "systemd not reachable";
+  $(`.slot[data-view="svc"]`).classList.toggle("has-fault", failed > 0);
+  $(`.slot[data-view="over"]`).classList.toggle("has-fault",
+    m.throttle.flags.some(f => f.set && f.scope === "now"));
+
+  $("#cores").innerHTML = m.cpu.per_core.map((v, i) =>
+    `<div class="core">
+       <div class="n"><span>c${i}</span><span>${v.toFixed(0)}</span></div>
+       <div class="bar ${band(v, 75, 92) || ""}"><i style="width:${v}%"></i></div>
+     </div>`).join("");
+
+  const diskRows = m.disks.map(d =>
+    `<div>
+       <div class="row-line"><span>${esc(d.mount)}</span>
+         <b>${bytes(d.used)} / ${bytes(d.total)}</b></div>
+       <div class="bar ${band(d.percent, 80, 92) || ""}"><i style="width:${d.percent}%"></i></div>
+     </div>`).join("");
+  $("#storage").innerHTML = diskRows +
+    `<div class="row-line" style="border-top:1px solid #1C232C;padding-top:10px">
+       <span>Network in</span><b>${rate(m.net.rx_bps)}</b></div>
+     <div class="row-line"><span>Network out</span><b>${rate(m.net.tx_bps)}</b></div>
+     <div class="row-line"><span>Transferred since boot</span>
+       <b>${bytes(m.net.rx_total)} / ${bytes(m.net.tx_total)}</b></div>`;
+}
+
+/* ------------------------------------------------ polling */
+let timer = null, misses = 0;
+function link(state, text) {
+  const el = $("#h-link");
+  el.className = "link-state " + state;
+  $("#h-link-t").textContent = text;
+}
+async function tick() {
+  try {
+    const m = await api("/api/metrics");
+    renderMetrics(m);
+    misses = 0;
+    link("live", "Live");
+    if (currentView === "svc" && !svcBusy) renderServices(await api("/api/services"));
+    if (currentView === "proc" && Date.now() - procStamp > 2500) loadProcs();
+    // Samples land every 30s; refreshing under a live crosshair would shift the
+    // points out from under the cursor, so wait until the pointer leaves.
+    if (currentView === "hist" && histHover == null && Date.now() - histStamp > 30000) loadHistory();
+    // Probes open real sockets, so they run far slower than the metrics tick:
+    // often while you are looking at them, occasionally to keep the rail lamp honest.
+    const age = Date.now() - dirStamp;
+    if (age > (currentView === "dir" ? 15000 : 60000)) loadDirectory();
+  } catch (e) {
+    if (/unauthorised/.test(e.message)) return;
+    misses++;
+    link("down", misses > 2 ? "Host unreachable" : "Retrying");
+  }
+}
+function startPolling() { stopPolling(); tick(); timer = setInterval(tick, 2000); }
+function stopPolling() { if (timer) clearInterval(timer); timer = null; }
+document.addEventListener("visibilitychange", () => {
+  if (!TOKEN) return;
+  document.hidden ? stopPolling() : startPolling();
+});
+
+/* ------------------------------------------------ units */
+let svcFilter = "all", svcCache = [], svcBusy = false;
+$("#svc-q").oninput = () => renderServices({ units: svcCache });
+$$("[data-svcf]").forEach(b => b.onclick = () => {
+  svcFilter = b.dataset.svcf;
+  $$("[data-svcf]").forEach(x => x.classList.toggle("on", x === b));
+  renderServices({ units: svcCache });
+});
+
+function renderServices(data) {
+  svcCache = data.units;
+  const q = $("#svc-q").value.toLowerCase();
+  const rank = u => u.active === "failed" ? 0 : u.sub === "running" ? 1 : 2;
+  const rows = svcCache
+    .filter(u => svcFilter === "all"
+      || (svcFilter === "running" && u.sub === "running")
+      || (svcFilter === "failed" && u.active === "failed"))
+    .filter(u => !q || u.unit.toLowerCase().includes(q) || u.description.toLowerCase().includes(q))
+    .sort((a, b) => rank(a) - rank(b) || a.unit.localeCompare(b.unit));
+
+  $("#svc-count").textContent = `${rows.length} shown · ${svcCache.length} total`;
+  $("#svc-empty").style.display = rows.length ? "none" : "block";
+  $("#svc-body").innerHTML = rows.map(u => {
+    const cls = u.active === "failed" ? "fail" : u.sub === "running" ? "run" : "";
+    return `<tr>
+      <td><span class="state ${cls}"><i></i>${esc(u.active)} · ${esc(u.sub)}</span></td>
+      <td class="unit-name">${esc(u.unit)}</td>
+      <td class="desc">${esc(u.description)}</td>
+      <td><div class="acts">
+        <button class="btn" data-act="restart" data-u="${esc(u.unit)}">Restart</button>
+        <button class="btn" data-act="${u.sub === "running" ? "stop" : "start"}" data-u="${esc(u.unit)}">${u.sub === "running" ? "Stop" : "Start"}</button>
+      </div></td></tr>`;
+  }).join("");
+}
+
+$("#svc-body").onclick = async e => {
+  const b = e.target.closest("[data-act]");
+  if (!b) return;
+  const was = b.textContent;
+  b.textContent = "…"; b.disabled = true; svcBusy = true;
+  try {
+    await api(`/api/services/${encodeURIComponent(b.dataset.u)}/${b.dataset.act}`, { method: "POST" });
+    renderServices(await api("/api/services"));
+  } catch (err) {
+    b.textContent = "Failed";
+    alert(`Couldn't ${b.dataset.act} ${b.dataset.u}.\n\n${err.message}\n\nThe dashboard user needs sudo rights for systemctl. See the README.`);
+    setTimeout(() => { b.textContent = was; b.disabled = false; }, 1500);
+  } finally {
+    svcBusy = false;
+  }
+};
+
+/* ------------------------------------------------ faults */
+let logCache = [];
+["#log-prio", "#log-unit", "#log-since"].forEach(s => $(s).onchange = loadLogs);
+$("#log-refresh").onclick = loadLogs;
+$("#log-q").oninput = renderLogs;
+
+async function loadLogs() {
+  if (!TOKEN) return;
+  $("#log-count").textContent = "loading…";
+  const p = new URLSearchParams({
+    priority: $("#log-prio").value,
+    lines: "500"
+  });
+  if ($("#log-unit").value) p.set("unit", $("#log-unit").value);
+  if ($("#log-since").value) p.set("since", $("#log-since").value);
+  try {
+    const d = await api("/api/logs?" + p);
+    logCache = d.entries;
+    const units = [...new Set(logCache.map(e => e.unit))].sort();
+    const sel = $("#log-unit"), keep = sel.value;
+    sel.innerHTML = `<option value="">All units</option>` +
+      units.map(u => `<option value="${esc(u)}">${esc(u)}</option>`).join("");
+    sel.value = keep;
+    renderLogs();
+  } catch (e) {
+    if (/unauthorised/.test(e.message)) return;
+    $("#log-count").textContent = "journal unreadable";
+    $("#log-list").innerHTML = "";
+    $("#log-empty").style.display = "block";
+    $("#log-empty").innerHTML =
+      "<strong>Can't read the journal</strong>The dashboard user needs to be in the <code>systemd-journal</code> group. See the README.";
+  }
+}
+
+const LOG_EMPTY_DEFAULT = $("#log-empty").innerHTML;
+function renderLogs() {
+  $("#log-empty").innerHTML = LOG_EMPTY_DEFAULT;
+  const q = $("#log-q").value.toLowerCase();
+  const rows = logCache.filter(e => !q ||
+    e.message.toLowerCase().includes(q) || e.unit.toLowerCase().includes(q));
+  $("#log-count").textContent = `${rows.length} entries`;
+  $("#log-empty").style.display = rows.length ? "none" : "block";
+  const cls = p => p <= 2 ? "p-crit" : p === 3 ? "p-err" : p === 4 ? "p-warn" : "";
+  $("#log-list").innerHTML = rows.slice(0, 800).map(e =>
+    `<div class="log ${cls(e.priority)}">
+       <time>${clock(e.ts)}</time>
+       <span class="p">${esc(e.priority_name.slice(0, 4))}</span>
+       <span class="u" title="${esc(e.unit)}">${esc(e.unit.replace(/\.service$/, ""))}</span>
+       <span class="m">${esc(e.message)}</span>
+     </div>`).join("");
+  const bad = logCache.some(e => e.priority <= 3);
+  $(`.slot[data-view="logs"]`).classList.toggle("has-fault", bad);
+}
+
+/* ------------------------------------------------ directory */
+let probeCache = [], portCache = [], dirStamp = 0;
+["#dir-scope"].forEach(s => $(s).onchange = renderPorts);
+$("#dir-q").oninput = () => { renderPorts(); renderWidgets(); };
+$("#dir-refresh").onclick = () => loadDirectory();
+
+async function loadDirectory() {
+  if (!TOKEN) return;
+  dirStamp = Date.now();
+  try {
+    const [p, s] = await Promise.all([api("/api/probes"), api("/api/ports")]);
+    probeCache = p.services;
+    probeConfigured = p.configured;
+    probeConfigPath = p.config_path;
+    portCache = s.sockets;
+    $("#dir-named").textContent = s.named ? "" :
+      "process names need the ss sudoers rule \u2014 see README";
+    renderWidgets(); renderPorts();
+  } catch (e) {
+    if (/unauthorised/.test(e.message)) return;
+    $("#dir-count").textContent = "directory unavailable";
+  }
+}
+
+let probeConfigured = false, probeConfigPath = "";
+
+/* A service is up, down, or unconfigured. Never colour alone: every state
+   carries a lamp AND the word, so it survives greyscale and colourblindness. */
+function renderWidgets() {
+  const q = $("#dir-q").value.toLowerCase();
+  const rows = probeCache.filter(s => !q || s.name.toLowerCase().includes(q)
+    || String(s.target).toLowerCase().includes(q));
+  const empty = $("#widget-empty");
+  $("#widgets").innerHTML = rows.map(widgetHTML).join("");
+  if (rows.length) { empty.style.display = "none"; return; }
+  empty.style.display = "block";
+  empty.innerHTML = probeConfigured
+    ? "<strong>No service matches the filter</strong>Clear the search to see them all."
+    : `<strong>No services configured yet</strong>Create <code>${esc(probeConfigPath)}</code>
+       to add widgets. See the README for the format.`;
+}
+
+function widgetHTML(s) {
+  const d = s.detail || {};
+  const up = !!s.up;
+  const facts = [];
+  if (s.type === "minecraft" && up) {
+    facts.push(["Players", `${d.online ?? "?"} / ${d.max ?? "?"}`]);
+    if (d.version) facts.push(["Version", d.version]);
+  } else if (s.type === "jellyfin" && up) {
+    if (d.version) facts.push(["Version", d.version]);
+    if (d.server) facts.push(["Server", d.server]);
+  } else if (d.status) {
+    facts.push(["HTTP", d.status]);
+  }
+
+  const icon = d.favicon
+    ? `<img class="w-icon" src="${esc(d.favicon)}" alt="">` : "";
+  const motd = s.type === "minecraft" && up && d.motd
+    ? `<div class="w-motd">${esc(d.motd)}</div>` : "";
+  const sample = (d.sample || []).length
+    ? `<div class="w-players">${d.sample.map(n => `<b>${esc(n)}</b>`).join("")}</div>` : "";
+  const err = !up && s.error ? `<div class="w-err">${esc(s.error)}</div>` : "";
+  const link = s.link
+    ? `<a class="w-link" href="${esc(s.link)}" target="_blank" rel="noopener noreferrer">Open \u2192</a>` : "";
+
+  return `<div class="w ${up ? "" : "down"}">
+    <div class="w-top">
+      ${icon}
+      <span class="w-name">${esc(s.name)}</span>
+      <span class="w-lat">${up && s.latency_ms != null ? s.latency_ms + " ms" : ""}</span>
+    </div>
+    <div class="state ${up ? "run" : "fail"}"><i></i>${up ? "Up" : "Down"}${
+      s.note ? ` \u00b7 <span style="color:var(--dim)">${esc(s.note)}</span>` : ""}</div>
+    ${motd}
+    ${facts.length ? `<div class="w-facts">${facts.map(([k, v]) =>
+      `<div class="w-fact"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join("")}</div>` : ""}
+    ${sample}
+    ${err}
+    <div class="w-target">${esc(s.target)}</div>
+    ${link}
+  </div>`;
+}
+
+const SCOPE_TEXT = { lan: "LAN", tailnet: "Tailnet", local: "Loopback", iface: "Interface" };
+
+function renderPorts() {
+  const q = $("#dir-q").value.toLowerCase();
+  const scope = $("#dir-scope").value;
+  const rows = portCache
+    .filter(s => !scope || s.scope === scope)
+    .filter(s => !q || String(s.port).includes(q) || s.label.toLowerCase().includes(q)
+      || s.proto.includes(q));
+  const lan = portCache.filter(s => s.scope === "lan").length;
+  $("#dir-count").textContent =
+    `${rows.length} of ${portCache.length} sockets \u00b7 ${lan} on the LAN`;
+  $("#ports-empty").style.display = rows.length ? "none" : "block";
+  $("#ports-body").innerHTML = rows.map(s => {
+    const host = s.scope === "lan" ? location.hostname : s.host;
+    const url = `http://${host}:${s.port}/`;
+    const name = s.http
+      ? `<a class="plink" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(s.label)}</a>`
+      : esc(s.label);
+    return `<tr>
+      <td><span class="port-n">${s.port}</span><span class="port-p">${esc(s.proto)}</span></td>
+      <td><span class="scope ${esc(s.scope)}"><i></i>${SCOPE_TEXT[s.scope] || esc(s.scope)}</span></td>
+      <td class="unit-name">${name}${s.process ? "" :
+        `<span class="port-p">guessed from port</span>`}</td>
+      <td class="desc">${esc(s.host)}</td>
+      <td class="pids">${s.pids.join(", ") || "\u2014"}</td>
+    </tr>`;
+  }).join("");
+  $(`.slot[data-view="dir"]`).classList.toggle("has-fault",
+    probeCache.some(s => !s.up));
+}
+
+/* ------------------------------------------------ history charts
+
+   Every chart is one series on one axis. Two measures never share a plot: the
+   only chart with a second series is the network one, where in and out are the
+   same measure mirrored about zero, so direction — not colour — tells them
+   apart. Lines stay in neutral ink; raspberry is reserved for the states that
+   mean something (the throttle threshold, and the bands where the SoC was
+   actually being held back). */
+const INK = "#8B98A8", GRID = "#1C232C", AXIS = "#2B3440", RASP = "#E23A5E";
+// Wide enough for the widest y label any chart produces, which is a network
+// rate like "4.8 MB/s". Every chart shares the geometry so the crosshair lines
+// up down the stack.
+const PAD = { l: 58, r: 12, t: 8, b: 17 };
+const PLOT_FONT = "10px 'JetBrains Mono', ui-monospace, monospace";
+const LEGEND_FONT = "600 9px 'Chakra Petch', ui-sans-serif, sans-serif";
+
+const CHART_SPECS = [
+  { key: "cpu", title: "CPU", avg: "cpu", peak: "cpu_max", yMax: 100, shade: true,
+    note: "line is the bucket average, shading above it the peak",
+    fmt: v => v.toFixed(0) + "%", tick: v => v.toFixed(0), warn: 75, bad: 92 },
+  { key: "temp", title: "Core temperature", avg: "temp", peak: "temp_max", shade: true,
+    note: "shaded columns are samples where the SoC was throttled or under-volted",
+    ref: { v: 80, label: "throttle" },
+    fmt: v => v.toFixed(1) + " °C", tick: v => v.toFixed(0), warn: 70, bad: 80 },
+  { key: "mem", title: "Memory", avg: "mem", yMax: 100,
+    note: "share of RAM in use, swap in the tooltip",
+    fmt: v => v.toFixed(0) + "%", tick: v => v.toFixed(0), warn: 80, bad: 92 },
+  { key: "net", title: "Network", mirror: ["rx", "tx"], tall: true,
+    note: "in above the line, out below",
+    fmt: v => rate(v), tick: v => rate(Math.abs(v)) },
+  { key: "disk", title: "Disk used", avg: "disk", yMax: 100,
+    note: "fullest mounted filesystem",
+    fmt: v => v.toFixed(1) + "%", tick: v => v.toFixed(0), warn: 80, bad: 92 }
+];
+
+let histSpan = 86400, histData = null, histHover = null, histStamp = 0, histBuilt = false;
+
+const niceMax = v => {
+  if (!(v > 0)) return 1;
+  const mag = Math.pow(10, Math.floor(Math.log10(v)));
+  return [1, 2, 2.5, 5, 10].map(s => s * mag).find(s => s >= v) || 10 * mag;
+};
+
+/* Contiguous stretches where every needed field has a value and no sample gap
+   is wide enough to be an outage. Drawing straight through a gap would invent
+   data for the hours the Pi was off, which is the one thing this tab must not do. */
+function runs(d, keys) {
+  const limit = (d.bucket_s || 60) * 2.5;
+  const out = [];
+  let cur = null, lastTs = null;
+  d.ts.forEach((ts, i) => {
+    if (!keys.every(k => d[k] && d[k][i] != null)) { cur = null; lastTs = null; return; }
+    if (!cur || (lastTs != null && ts - lastTs > limit)) { cur = []; out.push(cur); }
+    cur.push(i); lastTs = ts;
+  });
+  return out;
+}
+
+function timeTicks(t0, t1) {
+  const span = t1 - t0;
+  const steps = span > 86400 ? [43200, 86400, 172800, 604800]
+    : [300, 900, 1800, 3600, 7200, 10800, 21600, 43200];
+  const step = steps.find(s => span / s <= 6) || steps[steps.length - 1];
+  const off = -new Date().getTimezoneOffset() * 60;   // align to local, not UTC
+  const fmt = span <= 86400
+    ? t => t.toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit", hour12: false })
+    : step >= 86400
+      ? t => t.toLocaleDateString("en-AU", { day: "numeric", month: "short" })
+      : t => t.toLocaleDateString("en-AU", { day: "numeric", month: "short" }) + " " +
+             t.toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit", hour12: false });
+  const out = [];
+  for (let t = Math.ceil((t0 - off) / step) * step + off; t <= t1; t += step) {
+    out.push({ t, label: fmt(new Date(t * 1000)) });
+  }
+  return out;
+}
+
+function plot(cv, spec, d) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  const c = cv.getContext("2d");
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, w, h);
+  const iw = w - PAD.l - PAD.r, ih = h - PAD.t - PAD.b;
+  if (iw < 40 || ih < 24 || !d || !d.ts || !d.ts.length) return;
+
+  const t0 = d.start, t1 = d.end;
+  const X = ts => PAD.l + ((ts - t0) / Math.max(1, t1 - t0)) * iw;
+
+  const fields = spec.mirror || [spec.avg, spec.peak].filter(Boolean);
+  const all = fields.flatMap(k => (d[k] || []).filter(v => v != null));
+  const dataMax = all.length ? Math.max(...all) : 0;
+
+  let top, bottom;
+  if (spec.mirror) { top = niceMax(dataMax || 1); bottom = -top; }
+  else {
+    bottom = 0;
+    top = spec.yMax || niceMax(Math.max(dataMax * 1.15, spec.ref ? spec.ref.v * 1.05 : 0) || 1);
+  }
+  const Y = v => PAD.t + ih - ((v - bottom) / (top - bottom)) * ih;
+
+  /* -- throttle columns, behind everything -- */
+  if (spec.shade && d.throttle) {
+    c.fillStyle = "rgba(226,58,94,.15)";
+    d.ts.forEach((ts, i) => {
+      if (!d.throttle[i]) return;
+      const x = X(ts), x2 = X(ts + (d.bucket_s || 60));
+      c.fillRect(x, PAD.t, Math.max(1.5, x2 - x), ih);
+    });
+  }
+
+  /* -- grid and axis labels -- */
+  c.font = PLOT_FONT; c.textBaseline = "middle"; c.textAlign = "right";
+  const lines = spec.mirror ? [top, 0, bottom] : [top, (top + bottom) / 2, bottom];
+  lines.forEach(v => {
+    const y = Math.round(Y(v)) + 0.5;
+    c.strokeStyle = v === 0 && spec.mirror ? AXIS : GRID;
+    c.lineWidth = 1;
+    c.beginPath(); c.moveTo(PAD.l, y); c.lineTo(w - PAD.r, y); c.stroke();
+    if (v !== bottom || spec.mirror) {
+      c.fillStyle = "#5A6572";
+      c.fillText(spec.tick(v), PAD.l - 7, y);
+    }
+  });
+  c.strokeStyle = AXIS; c.lineWidth = 1;
+  c.beginPath();
+  c.moveTo(PAD.l + 0.5, PAD.t); c.lineTo(PAD.l + 0.5, PAD.t + ih + 0.5);
+  c.stroke();
+
+  c.textAlign = "center"; c.textBaseline = "top"; c.fillStyle = "#5A6572";
+  timeTicks(t0, t1).forEach(({ t, label }) => {
+    const x = X(t);
+    if (x < PAD.l + 12 || x > w - PAD.r - 12) return;
+    c.fillText(label, x, PAD.t + ih + 5);
+  });
+
+  /* -- reference line: the value that matters, not a decoration -- */
+  if (spec.ref && spec.ref.v <= top) {
+    const y = Math.round(Y(spec.ref.v)) + 0.5;
+    c.save();
+    c.setLineDash([3, 3]); c.strokeStyle = "#7A2137"; c.lineWidth = 1;
+    c.beginPath(); c.moveTo(PAD.l, y); c.lineTo(w - PAD.r, y); c.stroke();
+    c.restore();
+    c.textAlign = "right"; c.textBaseline = "bottom"; c.fillStyle = "#8A4054";
+    c.font = LEGEND_FONT;
+    c.fillText(spec.ref.label.toUpperCase(), w - PAD.r - 2, y - 2);
+    c.font = PLOT_FONT;
+  }
+
+  const strokeRun = (idx, key, sign) => {
+    c.beginPath();
+    idx.forEach((i, n) => {
+      const x = X(d.ts[i]), y = Y(sign * d[key][i]);
+      n ? c.lineTo(x, y) : c.moveTo(x, y);
+    });
+    c.strokeStyle = INK; c.lineWidth = 1.5; c.lineJoin = "round"; c.lineCap = "round";
+    c.stroke();
+  };
+
+  if (spec.mirror) {
+    spec.mirror.forEach((key, n) => {
+      const sign = n === 0 ? 1 : -1;
+      runs(d, [key]).forEach(idx => {
+        c.beginPath();
+        c.moveTo(X(d.ts[idx[0]]), Y(0));
+        idx.forEach(i => c.lineTo(X(d.ts[i]), Y(sign * d[key][i])));
+        c.lineTo(X(d.ts[idx[idx.length - 1]]), Y(0));
+        c.closePath();
+        c.fillStyle = "rgba(139,152,168,.13)"; c.fill();
+        strokeRun(idx, key, sign);
+      });
+    });
+    c.font = LEGEND_FONT; c.textAlign = "left"; c.fillStyle = "#5A6572";
+    c.textBaseline = "top"; c.fillText("IN", PAD.l + 6, PAD.t + 2);
+    c.textBaseline = "bottom"; c.fillText("OUT", PAD.l + 6, PAD.t + ih - 2);
+    c.font = PLOT_FONT;
+  } else {
+    if (spec.peak) {
+      runs(d, [spec.avg, spec.peak]).forEach(idx => {
+        c.beginPath();
+        idx.forEach((i, n) => {
+          const x = X(d.ts[i]), y = Y(d[spec.peak][i]);
+          n ? c.lineTo(x, y) : c.moveTo(x, y);
+        });
+        for (let n = idx.length - 1; n >= 0; n--) {
+          c.lineTo(X(d.ts[idx[n]]), Y(d[spec.avg][idx[n]]));
+        }
+        c.closePath(); c.fillStyle = "rgba(139,152,168,.16)"; c.fill();
+      });
+    }
+    runs(d, [spec.avg]).forEach(idx => {
+      if (!spec.peak) {
+        c.beginPath();
+        c.moveTo(X(d.ts[idx[0]]), Y(bottom));
+        idx.forEach(i => c.lineTo(X(d.ts[i]), Y(d[spec.avg][i])));
+        c.lineTo(X(d.ts[idx[idx.length - 1]]), Y(bottom));
+        c.closePath();
+        const g = c.createLinearGradient(0, PAD.t, 0, PAD.t + ih);
+        g.addColorStop(0, "rgba(139,152,168,.16)");
+        g.addColorStop(1, "rgba(139,152,168,0)");
+        c.fillStyle = g; c.fill();
+      }
+      strokeRun(idx, spec.avg, 1);
+    });
+  }
+
+  /* -- crosshair, shared with every other chart in the stack -- */
+  if (histHover != null && d.ts[histHover] != null) {
+    const x = Math.round(X(d.ts[histHover])) + 0.5;
+    c.strokeStyle = AXIS; c.lineWidth = 1;
+    c.beginPath(); c.moveTo(x, PAD.t); c.lineTo(x, PAD.t + ih); c.stroke();
+    const dots = spec.mirror
+      ? spec.mirror.map((k, n) => [k, n === 0 ? 1 : -1])
+      : [[spec.avg, 1]];
+    dots.forEach(([k, sign]) => {
+      const v = d[k] && d[k][histHover];
+      if (v == null) return;
+      c.beginPath(); c.arc(x, Y(sign * v), 2.75, 0, Math.PI * 2);
+      c.fillStyle = "#C6D0DC"; c.fill();
+      c.strokeStyle = "#151A21"; c.lineWidth = 1.5; c.stroke();
+    });
+  }
+}
+
+function lastValue(d, key) {
+  if (!d[key]) return null;
+  for (let i = d[key].length - 1; i >= 0; i--) if (d[key][i] != null) return d[key][i];
+  return null;
+}
+
+function buildCharts() {
+  if (histBuilt) return;
+  $("#hist-scroll").insertAdjacentHTML("beforeend", CHART_SPECS.map(s =>
+    `<div class="chart ${s.tall ? "tall" : ""}" data-chart="${s.key}">
+       <div class="chart-head">
+         <h3>${esc(s.title)}</h3>
+         <span class="chart-note">${esc(s.note)}</span>
+         <span class="chart-now"></span>
+       </div>
+       <canvas class="plot"></canvas>
+     </div>`).join(""));
+  histBuilt = true;
+}
+
+function drawCharts() {
+  if (!histData) return;
+  CHART_SPECS.forEach(s => {
+    const card = $(`[data-chart="${s.key}"]`);
+    if (!card) return;
+    plot(card.querySelector("canvas"), s, histData);
+    const now = card.querySelector(".chart-now");
+    if (s.mirror) {
+      const rx = lastValue(histData, "rx"), tx = lastValue(histData, "tx");
+      now.className = "chart-now";
+      now.textContent = rx == null ? "" : `${rate(rx)} in · ${rate(tx || 0)} out`;
+    } else {
+      const v = lastValue(histData, s.avg);
+      now.className = "chart-now" + (v == null ? "" : " " + (band(v, s.warn, s.bad) || ""));
+      now.textContent = v == null ? "" : s.fmt(v);
+    }
+  });
+}
+
+function renderHistory() {
+  const d = histData, empty = $("#hist-empty");
+  const show = msg => {
+    empty.style.display = "block"; empty.innerHTML = msg;
+    $$(".chart").forEach(c => c.style.display = "none");
+  };
+  if (!d) return;
+  if (!d.enabled) {
+    $("#hist-count").textContent = "recording off";
+    return show(`<strong>History is not being recorded</strong>
+      The sample store could not be opened: <code>${esc(d.reason || "unknown")}</code>.
+      Check the dashboard user can write to <code>~/.config/pidash/</code>.`);
+  }
+  buildCharts();
+  if (!d.count) {
+    $("#hist-count").textContent = "no samples yet";
+    return show(`<strong>Nothing recorded in this window yet</strong>
+      Samples are taken every ${d.interval_s}s and kept for ${d.retain_days} days.
+      ${d.oldest ? "The oldest sample is from " + new Date(d.oldest * 1000).toLocaleString("en-AU") + "."
+                 : "Leave the service running and come back."}`);
+  }
+  empty.style.display = "none";
+  $$(".chart").forEach(c => c.style.display = "");
+  const covered = d.ts.length ? d.end - Math.max(d.start, d.ts[0]) : 0;
+  const throttled = (d.throttle || []).some(v => v > 0);
+  $("#hist-count").textContent =
+    `${d.count} points · ${Math.round(d.bucket_s / 60)} min each · covering ${dur(covered)}`;
+  $(`.slot[data-view="hist"]`).classList.toggle("has-fault", throttled);
+  drawCharts();
+}
+
+async function loadHistory() {
+  if (!TOKEN) return;
+  if (!histData) $("#hist-count").textContent = "loading…";
+  histStamp = Date.now();
+  try {
+    histData = await api(`/api/history?span=${histSpan}&points=300`);
+    renderHistory();
+  } catch (e) {
+    if (/unauthorised/.test(e.message)) return;
+    $("#hist-count").textContent = "history unavailable";
+  }
+}
+
+$$("[data-span]").forEach(b => b.onclick = () => {
+  histSpan = Number(b.dataset.span);
+  $$("[data-span]").forEach(x => x.classList.toggle("on", x === b));
+  histHover = null; hideTip();
+  loadHistory();
+});
+$("#hist-refresh").onclick = loadHistory;
+
+/* -- shared crosshair + tooltip -- */
+const tip = $("#hist-tip");
+const hideTip = () => { tip.style.display = "none"; };
+
+function hoverIndex(cv, clientX) {
+  const d = histData;
+  if (!d || !d.ts || !d.ts.length) return null;
+  const r = cv.getBoundingClientRect();
+  const iw = r.width - PAD.l - PAD.r;
+  if (iw <= 0) return null;
+  const frac = Math.min(1, Math.max(0, (clientX - r.left - PAD.l) / iw));
+  const want = d.start + frac * (d.end - d.start);
+  let best = null, bestD = Infinity;
+  d.ts.forEach((ts, i) => {
+    const gap = Math.abs(ts - want);
+    if (gap < bestD) { bestD = gap; best = i; }
+  });
+  // Past the end of a gap there is no sample to report; say nothing.
+  return bestD > (d.bucket_s || 60) * 3 ? null : best;
+}
+
+function showTip(i, x, y) {
+  const d = histData;
+  const row = (label, val) => val == null ? ""
+    : `<div class="r"><span>${label}</span><b>${val}</b></div>`;
+  const at = new Date(d.ts[i] * 1000);
+  tip.innerHTML =
+    `<div class="when">${at.toLocaleString("en-AU", {
+        weekday: "short", day: "numeric", month: "short",
+        hour: "2-digit", minute: "2-digit", hour12: false })}</div>` +
+    row("CPU", d.cpu[i] == null ? null : `${d.cpu[i].toFixed(0)}%` +
+        (d.cpu_max[i] != null && d.cpu_max[i] - d.cpu[i] > 1 ? ` (peak ${d.cpu_max[i].toFixed(0)}%)` : "")) +
+    row("Temp", d.temp[i] == null ? null : `${d.temp[i].toFixed(1)} °C` +
+        (d.temp_max[i] != null && d.temp_max[i] - d.temp[i] > 0.5 ? ` (peak ${d.temp_max[i].toFixed(1)})` : "")) +
+    row("Load", d.load1[i] == null ? null : d.load1[i].toFixed(2)) +
+    row("Memory", d.mem[i] == null ? null : `${d.mem[i].toFixed(0)}%`) +
+    row("Swap", d.swap[i] ? `${d.swap[i].toFixed(0)}%` : null) +
+    row("Net in", d.rx[i] == null ? null : rate(d.rx[i])) +
+    row("Net out", d.tx[i] == null ? null : rate(d.tx[i])) +
+    row("Disk", d.disk[i] == null ? null : `${d.disk[i].toFixed(1)}%`) +
+    (d.throttle[i] ? `<div class="thr">Throttled or under-volted</div>` : "");
+  tip.style.display = "block";
+  const box = tip.getBoundingClientRect();
+  const left = x + 16 + box.width > innerWidth ? x - 16 - box.width : x + 16;
+  const topPos = Math.min(Math.max(8, y - box.height / 2), innerHeight - box.height - 8);
+  tip.style.left = Math.max(8, left) + "px";
+  tip.style.top = topPos + "px";
+}
+
+$("#hist-scroll").addEventListener("pointermove", e => {
+  const cv = e.target.closest(".chart")?.querySelector("canvas");
+  if (!cv) { if (histHover != null) { histHover = null; drawCharts(); } hideTip(); return; }
+  const i = hoverIndex(cv, e.clientX);
+  if (i !== histHover) { histHover = i; drawCharts(); }
+  i == null ? hideTip() : showTip(i, e.clientX, e.clientY);
+});
+$("#hist-scroll").addEventListener("pointerleave", () => {
+  if (histHover == null) return;
+  histHover = null; drawCharts(); hideTip();
+});
+$("#hist-scroll").addEventListener("scroll", hideTip, { passive: true });
+
+let histResize = null;
+addEventListener("resize", () => {
+  clearTimeout(histResize);
+  histResize = setTimeout(() => { if (currentView === "hist") drawCharts(); }, 120);
+});
+// Axis labels are measured in a webfont that may still be loading on first paint.
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(() => { if (currentView === "hist") drawCharts(); });
+}
+
+/* ------------------------------------------------ processes */
+let procSort = "cpu", procBusy = false, procStamp = 0, procDebounce = null;
+
+$$("[data-procsort]").forEach(b => b.onclick = () => {
+  procSort = b.dataset.procsort;
+  $$("[data-procsort]").forEach(x => x.classList.toggle("on", x === b));
+  loadProcs();
+});
+$("#proc-limit").onchange = loadProcs;
+$("#proc-q").oninput = () => {
+  clearTimeout(procDebounce);
+  procDebounce = setTimeout(loadProcs, 250);
+};
+
+async function loadProcs() {
+  if (!TOKEN || procBusy) return;
+  procBusy = true; procStamp = Date.now();
+  try {
+    const p = new URLSearchParams({ sort: procSort, limit: $("#proc-limit").value });
+    const q = $("#proc-q").value.trim();
+    if (q) p.set("q", q);
+    renderProcs(await api("/api/processes?" + p));
+  } catch (e) {
+    if (!/unauthorised/.test(e.message)) $("#proc-count").textContent = "process list unavailable";
+  } finally {
+    procBusy = false;
+  }
+}
+
+/* CPU is reported the way top reports it — percent of a single core — so a
+   busy four-core Pi reads up to 400. The bar is scaled against all cores so
+   the two agree. */
+function renderProcs(d) {
+  const cores = d.cores || 1;
+  const now = Date.now() / 1000;
+  $("#proc-count").textContent =
+    `${d.processes.length} shown · ${d.matched} matched · ${d.total} running · CPU is % of one core, ${cores} available`;
+  $("#proc-empty").style.display = d.processes.length ? "none" : "block";
+  $("#proc-body").innerHTML = d.processes.map(p => {
+    const share = p.cpu / cores;
+    const cpuBand = band(share, 25, 60) || "";
+    const memBand = band(p.mem_percent, 25, 50) || "";
+    return `<tr>
+      <td><div class="cpu-cell">
+        <span class="cpu-num ${cpuBand}">${p.cpu.toFixed(1)}</span>
+        <span class="minibar"><i class="${cpuBand}" style="width:${Math.min(100, share)}%"></i></span>
+      </div></td>
+      <td><div class="cpu-cell">
+        <span class="cpu-num">${bytes(p.rss)}</span>
+        <span class="minibar"><i class="${memBand}" style="width:${Math.min(100, p.mem_percent)}%"></i></span>
+      </div></td>
+      <td class="num">${p.pid}</td>
+      <td class="desc">${esc(p.user)}</td>
+      <td>
+        <span class="proc-name ${p.kernel ? "proc-kern" : ""}">${esc(p.name)}</span>
+        ${p.kernel ? "" : `<div class="proc-cmd">${esc(p.cmd)}</div>`}
+      </td>
+      <td class="desc">${p.started ? dur(now - p.started) : "—"}</td>
+    </tr>`;
+  }).join("");
+}
+
+/* ------------------------------------------------ nav */
+let currentView = "over";
+$$(".slot").forEach(b => b.onclick = () => {
+  currentView = b.dataset.view;
+  $$(".slot").forEach(x => x.setAttribute("aria-selected", String(x === b)));
+  $$(".view").forEach(v => v.classList.toggle("on", v.id === "view-" + currentView));
+  if (currentView === "dir") loadDirectory();
+  if (currentView === "svc" && TOKEN) api("/api/services").then(renderServices).catch(() => {});
+  if (currentView === "over") Object.values(sparks).forEach(s => s.redraw());
+  if (currentView === "proc") loadProcs();
+  // The canvases have no width until the section is displayed, so redraw what
+  // is already loaded on the next frame and refresh behind it.
+  if (currentView === "hist") { requestAnimationFrame(drawCharts); loadHistory(); }
+  if (currentView !== "hist") hideTip();
+});
+
+/* ------------------------------------------------ go */
+if (TOKEN) {
+  api("/api/metrics").then(start).catch(e => {
+    if (/unauthorised/.test(e.message)) lock("Stored token no longer works.");
+    else { $("#gate-token").value = TOKEN; $("#gate-err").textContent =
+      "Can't reach the Pi. Check the service is running and you're on the tailnet."; }
+  });
+} else {
+  $("#gate-token").focus();
+}
+</script>
+</body>
+</html>
