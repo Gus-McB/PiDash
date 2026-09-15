@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=pi-dash kiosk
+Comment=Show the dashboard full screen on the attached panel
+Exec=/opt/pi-dash/kiosk/pidash-kiosk.sh
+X-GNOME-Autostart-enabled=true
+NoDisplay=true

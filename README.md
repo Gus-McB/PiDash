@@ -146,6 +146,61 @@ Set these in the `[Service]` block of `/etc/systemd/system/pidash.service`.
 
 Read the token with `cat ~/.config/pidash/token`. Rotate it with `rm ~/.config/pidash/token && sudo systemctl restart pidash`, then read the new one the same way. The token is deliberately never printed to stdout, because under systemd that means the journal, where anyone in `systemd-journal` can read it back — including through this dashboard's own Faults tab.
 
+## On an HDMI panel
+
+The dashboard can also be its own appliance: a small HDMI screen hanging off the
+Pi, showing the Panel tab and nothing else. Run it as the desktop user, not with
+sudo — everything it writes belongs to that user.
+
+```bash
+./kiosk/install-kiosk.sh
+```
+
+That installs a launcher to `/opt/pi-dash/kiosk/`, an autostart entry into
+`~/.config/autostart/`, and a settings file at `~/.config/pidash/kiosk.conf`. It
+starts at the next login. To see it now without logging out, run
+`/opt/pi-dash/kiosk/pidash-kiosk.sh`; to stop it coming back, delete the
+autostart entry.
+
+A panel has no keyboard, which is the whole problem. The token gate cannot be
+typed at, so the launcher writes a `0600` bootstrap page inside the `0700` config
+directory that redirects to the dashboard with the token in the URL **fragment**,
+and `index.html` stores it and clears the fragment on arrival. The fragment is
+never sent to the server, so the token cannot end up in an access log or a
+`Referer`. The token is deliberately not passed as a browser argument, because
+argv is world readable through `/proc` — and this dashboard's own Processes tab
+prints command lines.
+
+The same mechanism works from any browser: append `#token=<token>` to the URL and
+it lets itself in once, instead of asking.
+
+Two settings in `kiosk.conf` are worth the trouble:
+
+- **`PIDASH_KIOSK_SCALE`** — the dashboard is dense and a small panel needs it
+  shrunk. Start at `1.0` and go down until the Panel tab fits without scrolling.
+  Roughly `0.8` at 1024x600, `0.65` at 800x480, `0.5` at 480x320.
+- **`PIDASH_KIOSK_OUTPUT`** and **`PIDASH_KIOSK_ROTATE`** — for a panel mounted on
+  its side. Set both or neither; connector names come from `wlr-randr`, and on a
+  Pi 5 the ports are `HDMI-A-1` and `HDMI-A-2`. Left unset, the mode the
+  compositor negotiated is not touched.
+
+The launcher waits for the dashboard to answer before starting the browser,
+because the service binds to the `tailscale0` address and `tailscaled` may still
+be coming up at boot. A kiosk that boots to a connection error stays on a
+connection error until somebody walks over to it.
+
+If the panel reports a mode that does not work — a blank or scrambled screen —
+force it in `/boot/firmware/cmdline.txt`, not `config.txt`. The Pi 5 uses KMS and
+ignores the old `hdmi_*` lines:
+
+```
+video=HDMI-A-1:800x480M@60D
+```
+
+The trailing `D` forces digital output on a panel whose EDID is unreadable or
+lying. Add it to the single existing line, space separated — that file is one
+line and a second line is silently ignored.
+
 ## HTTPS
 
 Plain HTTP inside a tailnet is already encrypted by WireGuard, but browsers treat it as insecure. To get a real certificate:
@@ -177,6 +232,17 @@ dark.
 **History is empty after an install** — nothing is backfilled, because nothing
 was recorded before the service started. The first point appears one interval
 after boot, and a 7-day window is only useful after 7 days.
+
+**The kiosk does not come up at login** — run
+`/opt/pi-dash/kiosk/pidash-kiosk.sh` from a terminal and read what it says. The
+autostart entry is only processed inside the desktop session, so this is usually
+a Pi booted to the console rather than to the desktop: check
+`systemctl get-default` says `graphical.target` and that autologin is on.
+
+**The kiosk shows the token gate** — the launcher could not read
+`~/.config/pidash/token`, so it fell back to the plain URL. It prints a line
+saying so. Check the file exists and that the desktop user owns it; the kiosk
+and the service must run as the same user, or the kiosk needs its own copy.
 
 **A widget says Down but the service works** — check what you are probing. An HTTP service behind auth returns 401, which counts as down unless you set `"expect": "any"`. A `link` is never probed; only `url`/`host`+`port` are.
 

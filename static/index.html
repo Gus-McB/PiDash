@@ -604,6 +604,22 @@ const store = {
   clear(){ try { localStorage.removeItem("pidash-token"); } catch {} }
 };
 let TOKEN = store.get();
+
+/* A kiosk panel has no keyboard to type the token into, so accept it from the
+   URL once and let localStorage carry it from there. The fragment, not the
+   query string: fragments are never sent to the server, so the token cannot
+   land in an access log or a Referer header. Stripped from the address bar
+   immediately, which also keeps it out of the history entry. */
+(() => {
+  const m = /(?:^|&)token=([^&]*)/.exec(location.hash.slice(1));
+  if (!m) return;
+  let v;
+  try { v = decodeURIComponent(m[1]).trim(); } catch { return; }
+  history.replaceState(null, "", location.pathname + location.search);
+  if (!v) return;
+  TOKEN = v; store.set(v);
+})();
+
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
 
